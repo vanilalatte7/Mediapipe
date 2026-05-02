@@ -1,0 +1,11 @@
+# Core AI & Vision
+tensorflow>=2.10.0
+mediapipe>=0.10.0
+opencv-python>=4.8.0
+numpy>=1.23.0
+
+# Backend & Integrasi Database
+firebase-admin>=6.2.0
+
+# Jika menggunakan Raspberry Pi murni (Opsional, menggantikan tensorflow):
+# tflite-runtime>=2.14.0
