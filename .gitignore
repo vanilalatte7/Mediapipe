@@ -8,10 +8,6 @@ venv/
 env/
 .venv/
 
-# Folder Arsip & Sampah (Agar repo GitHub tidak bengkak)
-archive/
-temp_saved_model/
-scratch/
 
 # File Rahasia Firebase (JANGAN PERNAH DI-UPLOAD KE GITHUB!)
 config/firebase_credentials.json
