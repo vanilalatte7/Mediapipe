@@ -8,17 +8,27 @@ import time
 from datetime import datetime
 import threading
 import queue
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import StreamingResponse
+import uvicorn
 
 # ==========================================
 # KONFIGURASI STANDAR INDUSTRI IOT
 # ==========================================
-HEADLESS_MODE = True # Ubah ke False jika ingin melihat video di layar Raspi
 COOLDOWN_SECONDS = 60
 USER_ID = "patient_001"
 MODEL_PATH = '../models/model.tflite'
 LABEL_PATH = '../models/labels.npy'
 FIREBASE_CRED_PATH = '../config/firebase_credentials.json'
 
+# Status Global untuk API
+global_status = {
+    "current_label": "Waiting...",
+    "confidence": 0.0,
+    "last_signal_sent": None
+}
+
+app = FastAPI(title="Stroke Monitor IoT Backend")
 
 # ==========================================
 # 1. FIREBASE WORKER THREAD
@@ -30,10 +40,8 @@ last_signal_time = {}
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore
-    # Setup Firebase
     if os.path.exists(FIREBASE_CRED_PATH):
         cred = credentials.Certificate(FIREBASE_CRED_PATH)
-
         firebase_admin.initialize_app(cred)
         db = firestore.client()
         print("✅ Firebase Terhubung!")
@@ -45,11 +53,10 @@ except ImportError:
     db = None
 
 def firebase_worker():
-    """Background thread khusus untuk mengelola pengiriman data agar tidak membuat lag kamera"""
     global gesture_mapping
     while True:
         task = firebase_queue.get()
-        if task is None: break # Sinyal berhenti
+        if task is None: break 
         
         action = task.get('action')
         
@@ -70,9 +77,9 @@ def firebase_worker():
             gestur = task.get('gestur')
             current_time = time.time()
             
-            # Cek Cooldown
             if kebutuhan not in last_signal_time or (current_time - last_signal_time[kebutuhan] > COOLDOWN_SECONDS):
                 print(f"🚀 MENGIRIM SINYAL: '{kebutuhan}' (Gestur: {gestur})")
+                global_status["last_signal_sent"] = f"{kebutuhan} at {datetime.now().strftime('%H:%M:%S')}"
                 if db:
                     try:
                         db.collection('users').document(USER_ID).collection('history').document().set({
@@ -87,12 +94,11 @@ def firebase_worker():
                     last_signal_time[kebutuhan] = current_time
         firebase_queue.task_done()
 
-# Mulai worker Firebase
 threading.Thread(target=firebase_worker, daemon=True).start()
 firebase_queue.put({'action': 'sync_config'})
 
 # ==========================================
-# 2. INISIALISASI TFLITE INTERPRETER (Sangat Ringan)
+# 2. INISIALISASI TFLITE & MEDIAPIPE
 # ==========================================
 if not os.path.exists(MODEL_PATH) or not os.path.exists(LABEL_PATH):
     print("ERROR: model.tflite atau labels.npy tidak ditemukan!")
@@ -100,33 +106,32 @@ if not os.path.exists(MODEL_PATH) or not os.path.exists(LABEL_PATH):
 
 labels = np.load(LABEL_PATH)
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
-
-# Mengatur ops khusus jika diperlukan (terutama jika ada SELECT_TF_OPS)
 interpreter.allocate_tensors()
-
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-print(f"✅ TFLite Interpreter Siap! Input shape: {input_details[0]['shape']}")
 
 def predict_tflite(input_data):
-    """Menjalankan inferensi sangat cepat menggunakan TFLite"""
     input_data = np.array(input_data, dtype=np.float32)
-    # TFLite memerlukan shape [1, 30, 63] (Contoh)
     if len(input_data.shape) == 2:
         input_data = np.expand_dims(input_data, axis=0)
-        
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
     return interpreter.get_tensor(output_details[0]['index'])[0]
+
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+mp_draw = mp.solutions.drawing_utils
+
+buffer = deque(maxlen=30)
+pred_history = deque(maxlen=12)
 
 # ==========================================
 # 3. THREADED CAMERA STREAM
 # ==========================================
 class VideoStream:
-    """Membaca kamera di background thread agar tidak menghalangi AI"""
     def __init__(self, src=0):
         self.stream = cv2.VideoCapture(src)
-        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 640) # Downscale agar ringan
+        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.grabbed, self.frame = self.stream.read()
         self.stopped = False
@@ -148,30 +153,20 @@ class VideoStream:
     def stop(self):
         self.stopped = True
 
-# ==========================================
-# 4. MAIN LOOP (CORE AI)
-# ==========================================
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
-mp_draw = mp.solutions.drawing_utils
-
-buffer = deque(maxlen=30)
-pred_history = deque(maxlen=12)
-
-print("===============================================================")
-print("🤖 BACKEND RASPBERRY PI IOT AKTIF")
-print(f"Mode Headless: {'ON (Lebih Cepat)' if HEADLESS_MODE else 'OFF (Tampil Jendela)'}")
-print("Tekan Ctrl+C untuk berhenti.")
-print("===============================================================")
-
 vs = VideoStream(0).start()
-time.sleep(2.0) # Pemanasan kamera
+time.sleep(2.0)
 
-try:
+# ==========================================
+# 4. CORE AI GENERATOR (Untuk Streaming)
+# ==========================================
+def generate_frames():
+    global global_status
     while True:
         frame = vs.read()
-        if frame is None: continue
-        
+        if frame is None:
+            time.sleep(0.1)
+            continue
+            
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(rgb)
@@ -181,8 +176,7 @@ try:
         
         if results.multi_hand_landmarks:
             for hand_lms in results.multi_hand_landmarks:
-                if not HEADLESS_MODE:
-                    mp_draw.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
+                mp_draw.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
                 
                 pts = np.array([[lm.x, lm.y, lm.z] for lm in hand_lms.landmark])
                 wrist = pts[0]
@@ -196,7 +190,7 @@ try:
                 if len(buffer) == 30:
                     pred = predict_tflite(list(buffer))
                     idx = np.argmax(pred)
-                    conf = pred[idx]
+                    conf = float(pred[idx])
                     
                     if conf > 0.70:
                         if conf > 0.90: pred_history.append(labels[idx])
@@ -213,20 +207,43 @@ try:
                     else:
                         label = "Analyzing..."
 
-        # Tampilkan GUI jika Headless = False
-        if not HEADLESS_MODE:
-            status_text = f"{label} ({conf:.2f})"
-            cv2.putText(frame, status_text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow('IoT Edge Node', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-        else:
-            # Di mode headless, hanya print jika ada perubahan atau sinyal kuat
-            if conf > 0.85:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] AI Mendeteksi: {label} ({conf:.2f})")
+        # Update global status untuk API JSON
+        global_status["current_label"] = str(label)
+        global_status["confidence"] = conf
 
-except KeyboardInterrupt:
-    print("\nMenghentikan sistem IoT...")
-finally:
-    vs.stop()
-    cv2.destroyAllWindows()
+        # Gambar teks di frame untuk stream video
+        status_text = f"{label} ({conf:.2f})"
+        cv2.putText(frame, status_text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Konversi ke format JPEG untuk web stream
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        if ret:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
+
+# ==========================================
+# 5. FASTAPI ENDPOINTS
+# ==========================================
+@app.get("/")
+def read_root():
+    return {"status": "AI IoT Backend is Running"}
+
+@app.get("/status")
+def get_status():
+    """Mengembalikan status gestur terkini (JSON)"""
+    return global_status
+
+@app.post("/sync")
+def sync_firebase():
+    """Memaksa sinkronisasi katalog konfigurasi dari Firebase"""
+    firebase_queue.put({'action': 'sync_config'})
+    return {"status": "Sync request sent to Firebase worker"}
+
+@app.get("/video_feed")
+def video_feed():
+    """Endpoint untuk live streaming video ke browser / frontend"""
+    return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+if __name__ == "__main__":
+    print("Mulai server FastAPI. Akses http://localhost:8000/video_feed untuk melihat kamera.")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

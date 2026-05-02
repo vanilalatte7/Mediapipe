@@ -6,6 +6,9 @@ numpy>=1.23.0
 
 # Backend & Integrasi Database
 firebase-admin>=6.2.0
+fastapi>=0.103.0
+uvicorn>=0.23.2
+
 
 # Jika menggunakan Raspberry Pi murni (Opsional, menggantikan tensorflow):
 # tflite-runtime>=2.14.0
