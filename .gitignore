@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Lingkungan Virtual (Virtual Environment)
+venv/
+env/
+.venv/
+
+# Folder Arsip & Sampah (Agar repo GitHub tidak bengkak)
+archive/
+temp_saved_model/
+scratch/
+
+# File Rahasia Firebase (JANGAN PERNAH DI-UPLOAD KE GITHUB!)
+config/firebase_credentials.json
+firebase_credentials.json
