@@ -18,8 +18,9 @@ import uvicorn
 # ==========================================
 COOLDOWN_SECONDS = 60
 USER_ID = "patient_001"
-MODEL_PATH = '../archive/asl_pro_final_efficient_new.h5'
+MODEL_PATH = '../archive/asl_pro_final.h5'
 LABEL_PATH = '../models/labels.npy'
+
 FIREBASE_CRED_PATH = '../config/firebase_credentials.json'
 
 global_status = {

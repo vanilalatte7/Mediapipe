@@ -14,8 +14,9 @@ def patched_init(original_init):
 keras.layers.Dense.__init__ = patched_init(keras.layers.Dense.__init__)
 keras.layers.LSTM.__init__ = patched_init(keras.layers.LSTM.__init__)
 
-model_path = 'asl_pro_final_efficient_new.h5'
-tflite_path = 'model.tflite'
+model_path = '../archive/asl_pro_final.h5'
+tflite_path = '../models/model.tflite'
+
 
 if not os.path.exists(model_path):
     print(f"ERROR: Model asal '{model_path}' tidak ditemukan.")

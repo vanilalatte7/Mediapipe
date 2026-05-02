@@ -17,8 +17,9 @@ keras.layers.Dense.__init__ = patched_init(keras.layers.Dense.__init__)
 keras.layers.LSTM.__init__ = patched_init(keras.layers.LSTM.__init__)
 
 # 1. LOAD MODEL & LABELS
-MODEL_PATH = '../archive/asl_pro_final_efficient_new.h5'
+MODEL_PATH = '../archive/asl_pro_final.h5'
 LABEL_PATH = '../models/labels.npy'
+
 
 if not os.path.exists(MODEL_PATH):
     print(f"ERROR: File model '{MODEL_PATH}' tidak ditemukan!")
