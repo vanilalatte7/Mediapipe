@@ -192,9 +192,13 @@ def generate_frames():
                     idx = np.argmax(pred[0])
                     conf = float(pred[0][idx])
                     
-                    if conf > 0.70:
-                        if conf > 0.90: pred_history.append(labels[idx])
+                    if conf > 0.75:
                         pred_history.append(labels[idx])
+                        if conf > 0.95: 
+                            pred_history.append(labels[idx])
+                    elif conf < 0.40:
+                        pred_history.clear()
+
                     
                     if len(pred_history) > 0:
                         label = max(set(pred_history), key=list(pred_history).count)

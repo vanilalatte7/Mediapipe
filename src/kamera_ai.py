@@ -89,8 +89,13 @@ while cap.isOpened():
                 conf = pred[0][idx]
                 
                 # Update riwayat prediksi jika confidence cukup tinggi
-                if conf > 0.65:
+                if conf > 0.75:
                     pred_history.append(labels[idx])
+                    if conf > 0.95:
+                        pred_history.append(labels[idx])
+                elif conf < 0.40:
+                    pred_history.clear()
+
                 
                 # Voting Mechanism: Ambil huruf yang paling konsisten muncul
                 if len(pred_history) > 0:

@@ -192,9 +192,15 @@ def generate_frames():
                     idx = np.argmax(pred)
                     conf = float(pred[idx])
                     
-                    if conf > 0.70:
-                        if conf > 0.90: pred_history.append(labels[idx])
+                    if conf > 0.75:
                         pred_history.append(labels[idx])
+                        if conf > 0.95: 
+                            # Fast-Trigger: Jika sangat yakin, beri bobot ganda agar responsif
+                            pred_history.append(labels[idx])
+                    elif conf < 0.40:
+                        # Reset memori jika tangan sedang berpindah/blur (mencegah lag gestur lama)
+                        pred_history.clear()
+
                     
                     if len(pred_history) > 0:
                         label = max(set(pred_history), key=list(pred_history).count)
